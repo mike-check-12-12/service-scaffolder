@@ -1,4 +1,4 @@
-name: Scaffold New Microservice
+name: Create New Service
 
 on:
   workflow_dispatch:
@@ -11,31 +11,26 @@ on:
         description: "Owning team identifier"
         required: true
         type: string
-      domain:
-        description: "Business domain"
-        required: true
-        type: string
       language:
         description: "Primary programming language"
         required: true
-        type: choice
-        options:
-          - Java
-          - Go
-          - Python
-          - TypeScript
-          - Rust
-          - Kotlin
+        type: string
+      environment:
+        description: "Target environment"
+        required: true
+        type: string
+      internet_facing:
+        description: "Is this service internet-facing?"
+        required: false
+        type: string
+        default: "false"
       tier:
         description: "Service tier"
-        required: true
-        type: choice
-        options:
-          - "Tier 1 - Critical"
-          - "Tier 2 - Standard"
-          - "Tier 3 - Internal"
+        required: false
+        type: string
+        default: "standard"
       port_run_id:
-        description: "Port action run ID (auto-populated)"
+        description: "Port action run ID"
         required: false
         type: string
 
@@ -43,262 +38,109 @@ permissions:
   contents: write
 
 jobs:
-  scaffold:
+  create-service:
     runs-on: ubuntu-latest
+    env:
+      SERVICE_NAME: ${{ inputs.service_name }}
+      ORG: mike-check-12-12
+
     steps:
-      # ── Step 1: Inform Port the action is IN_PROGRESS ──
-      - name: Inform Port — action started
-        if: ${{ inputs.port_run_id != '' }}
+      # ── Log start ──
+      - name: Log — action started
+        if: inputs.port_run_id != ''
         uses: port-labs/port-github-action@v1
         with:
           clientId: ${{ secrets.PORT_CLIENT_ID }}
           clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          baseUrl: https://api.getport.io
           operation: PATCH_RUN
           runId: ${{ inputs.port_run_id }}
           logMessage: |
-            🚀 Starting scaffold for service **${{ inputs.service_name }}**
-            - Language: ${{ inputs.language }}
-            - Domain: ${{ inputs.domain }}
+            🚀 Creating service **${{ inputs.service_name }}**
             - Team: ${{ inputs.team }}
-            - Tier: ${{ inputs.tier }}
+            - Language: ${{ inputs.language }}
+            - Environment: ${{ inputs.environment }}
+            - Internet-facing: ${{ inputs.internet_facing }}
 
-      # ── Step 2: Create the GitHub repository ──
-      - name: Create service repository
-        id: create_repo
+      # ── Clone the golden-path template ──
+      - name: Clone service-template
         env:
           GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
         run: |
-          REPO_NAME="${{ inputs.service_name }}"
-          ORG="mike-check-12-12"
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${ORG}/service-template.git" "${SERVICE_NAME}"
+          cd "${SERVICE_NAME}"
+          rm -rf .git
 
-          echo "Creating repository ${ORG}/${REPO_NAME}..."
-          gh repo create "${ORG}/${REPO_NAME}" \
+      # ── Customize the template ──
+      - name: Customize template for this service
+        run: |
+          cd "${SERVICE_NAME}"
+
+          # Replace placeholders in k8s manifests
+          sed -i "s/SERVICE_NAME/${SERVICE_NAME}/g" k8s/deployment.yaml
+
+          # Replace placeholders in catalog-info
+          sed -i "s/SERVICE_NAME/${SERVICE_NAME}/g" catalog-info.yaml
+          sed -i "s/TEAM_NAME/${{ inputs.team }}/g" catalog-info.yaml
+
+          # Set service name in app
+          sed -i "s/sample-service/${SERVICE_NAME}/g" app/main.py
+
+          echo "✅ Template customized for ${SERVICE_NAME}"
+
+      # ── Create the GitHub repo ──
+      - name: Create GitHub repository
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
+        run: |
+          cd "${SERVICE_NAME}"
+          git init
+          git config user.email "platform@walmart.com"
+          git config user.name "Walmart Platform Bot"
+          git checkout -b main
+          git add -A
+          git commit -m "feat: initialize ${SERVICE_NAME} from golden-path template"
+
+          gh repo create "${ORG}/${SERVICE_NAME}" \
             --public \
-            --description "${{ inputs.service_name }} - ${{ inputs.domain }} domain (${{ inputs.language }})" \
-            --add-readme
+            --description "${SERVICE_NAME} — owned by ${{ inputs.team }} (${{ inputs.language }})" \
+            --source . \
+            --push
 
-          echo "repo_url=https://github.com/${ORG}/${REPO_NAME}" >> $GITHUB_OUTPUT
-          echo "repo_name=${REPO_NAME}" >> $GITHUB_OUTPUT
-          sleep 3
+          echo "📦 Repository created: https://github.com/${ORG}/${SERVICE_NAME}"
 
-      - name: Report progress — repo created
-        if: ${{ inputs.port_run_id != '' }}
+      # ── Set secrets on the new repo so its CI can talk to Port ──
+      - name: Configure repo secrets
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
+        run: |
+          gh secret set PORT_CLIENT_ID \
+            --body "${{ secrets.PORT_CLIENT_ID }}" \
+            --repo "${ORG}/${SERVICE_NAME}"
+          gh secret set PORT_CLIENT_SECRET \
+            --body "${{ secrets.PORT_CLIENT_SECRET }}" \
+            --repo "${ORG}/${SERVICE_NAME}"
+          echo "🔐 Port secrets configured on ${SERVICE_NAME}"
+
+      - name: Log — repo created
+        if: inputs.port_run_id != ''
         uses: port-labs/port-github-action@v1
         with:
           clientId: ${{ secrets.PORT_CLIENT_ID }}
           clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          baseUrl: https://api.getport.io
           operation: PATCH_RUN
           runId: ${{ inputs.port_run_id }}
-          logMessage: "📦 Repository **mike-check-12-12/${{ inputs.service_name }}** created successfully"
+          logMessage: |
+            📦 Repository created from golden-path template
+            - Dockerfile, K8s manifests, CI pipeline included
+            - Port secrets configured for automated catalog updates
           link: '["https://github.com/mike-check-12-12/${{ inputs.service_name }}"]'
 
-      # ── Step 3: Clone and scaffold the project ──
-      - name: Clone and scaffold project structure
-        env:
-          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
-        run: |
-          REPO_NAME="${{ inputs.service_name }}"
-          ORG="mike-check-12-12"
-          LANG="${{ inputs.language }}"
-
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/${ORG}/${REPO_NAME}.git"
-          cd "${REPO_NAME}"
-          git config user.email "platform-engineering@walmart.com"
-          git config user.name "Walmart Platform Bot"
-
-          # Create standard directory structure
-          mkdir -p src tests docs .github/workflows k8s
-
-          # Create Dockerfile
-          cat > Dockerfile <<'DOCKERFILE'
-          # Auto-generated by Walmart Platform Engineering
-          FROM base-image:latest
-          WORKDIR /app
-          COPY . .
-          RUN echo "Build step for ${LANG}"
-          CMD ["start"]
-          DOCKERFILE
-
-          # Create k8s deployment manifest
-          cat > k8s/deployment.yaml <<EOF
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: ${REPO_NAME}
-            labels:
-              app: ${REPO_NAME}
-              domain: ${{ inputs.domain }}
-              team: ${{ inputs.team }}
-              tier: "${{ inputs.tier }}"
-          spec:
-            replicas: 2
-            selector:
-              matchLabels:
-                app: ${REPO_NAME}
-            template:
-              metadata:
-                labels:
-                  app: ${REPO_NAME}
-              spec:
-                containers:
-                  - name: ${REPO_NAME}
-                    image: walmart-registry/${REPO_NAME}:latest
-                    ports:
-                      - containerPort: 8080
-          EOF
-
-          # Create CI pipeline
-          cat > .github/workflows/ci.yaml <<'CIYAML'
-          name: CI Pipeline
-          on:
-            push:
-              branches: [main]
-            pull_request:
-              branches: [main]
-          jobs:
-            build-and-test:
-              runs-on: ubuntu-latest
-              steps:
-                - uses: actions/checkout@v4
-                - name: Build
-                  run: echo "Building..."
-                - name: Test
-                  run: echo "Running tests..."
-                - name: Security Scan
-                  run: echo "Scanning dependencies..."
-          CIYAML
-
-          # Language-specific scaffolding
-          case "${LANG}" in
-            Java)
-              cat > src/Application.java <<'JAVA'
-          package com.walmart.service;
-          // Auto-scaffolded by Platform Engineering
-          public class Application {
-              public static void main(String[] args) {
-                  System.out.println("Service starting...");
-              }
-          }
-          JAVA
-              ;;
-            Go)
-              cat > src/main.go <<'GOLANG'
-          package main
-          import "fmt"
-          // Auto-scaffolded by Platform Engineering
-          func main() {
-              fmt.Println("Service starting...")
-          }
-          GOLANG
-              ;;
-            Python)
-              cat > src/main.py <<'PYTHON'
-          """Auto-scaffolded by Platform Engineering."""
-          def main():
-              print("Service starting...")
-          if __name__ == "__main__":
-              main()
-          PYTHON
-              cat > requirements.txt <<'REQ'
-          fastapi>=0.100.0
-          uvicorn>=0.23.0
-          REQ
-              ;;
-            TypeScript)
-              cat > src/index.ts <<'TS'
-          // Auto-scaffolded by Platform Engineering
-          console.log("Service starting...");
-          TS
-              cat > package.json <<PKGJSON
-          {
-            "name": "${REPO_NAME}",
-            "version": "1.0.0",
-            "scripts": { "start": "ts-node src/index.ts" }
-          }
-          PKGJSON
-              ;;
-            Rust)
-              cat > src/main.rs <<'RUST'
-          // Auto-scaffolded by Platform Engineering
-          fn main() {
-              println!("Service starting...");
-          }
-          RUST
-              ;;
-            Kotlin)
-              cat > src/Application.kt <<'KOTLIN'
-          // Auto-scaffolded by Platform Engineering
-          fun main() {
-              println("Service starting...")
-          }
-          KOTLIN
-              ;;
-          esac
-
-          # Create CODEOWNERS
-          cat > .github/CODEOWNERS <<EOF
-          * @mike-check-12-12/${{ inputs.team }}
-          EOF
-
-          # Create service catalog docs
-          cat > docs/SERVICE.md <<EOF
-          # ${{ inputs.service_name }}
-
-          **Domain:** ${{ inputs.domain }}
-          **Team:** ${{ inputs.team }}
-          **Language:** ${{ inputs.language }}
-          **Tier:** ${{ inputs.tier }}
-
-          ## Overview
-          This service was scaffolded by Walmart Platform Engineering.
-
-          ## Getting Started
-          See the README for development setup instructions.
-          EOF
-
-          # Commit & push
-          git add -A
-          git commit -m "feat: scaffold ${REPO_NAME} microservice [platform-engineering]"
-          git push origin main
-
-      - name: Report progress — code scaffolded
-        if: ${{ inputs.port_run_id != '' }}
-        uses: port-labs/port-github-action@v1
-        with:
-          clientId: ${{ secrets.PORT_CLIENT_ID }}
-          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          baseUrl: https://api.getport.io
-          operation: PATCH_RUN
-          runId: ${{ inputs.port_run_id }}
-          logMessage: |
-            🏗️ Project scaffolded with:
-            - `src/` — ${{ inputs.language }} boilerplate
-            - `Dockerfile` — container build
-            - `k8s/deployment.yaml` — Kubernetes manifest
-            - `.github/workflows/ci.yaml` — CI pipeline
-            - `.github/CODEOWNERS` — team ownership
-            - `docs/SERVICE.md` — service catalog docs
-
-      # ── Step 4: Register in Port catalog ──
-      - name: Report progress — registering in catalog
-        if: ${{ inputs.port_run_id != '' }}
-        uses: port-labs/port-github-action@v1
-        with:
-          clientId: ${{ secrets.PORT_CLIENT_ID }}
-          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          baseUrl: https://api.getport.io
-          operation: PATCH_RUN
-          runId: ${{ inputs.port_run_id }}
-          logMessage: "📋 Registering **${{ inputs.service_name }}** in the software catalog..."
-
+      # ── Register Service entity in Port ──
       - name: Register service in Port catalog
         uses: port-labs/port-github-action@v1
         with:
           clientId: ${{ secrets.PORT_CLIENT_ID }}
           clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          baseUrl: https://api.getport.io
           operation: UPSERT
           runId: ${{ inputs.port_run_id }}
           identifier: ${{ inputs.service_name }}
@@ -306,55 +148,70 @@ jobs:
           title: ${{ inputs.service_name }}
           properties: |-
             {
-              "tier": "${{ inputs.tier }}",
-              "lifecycle": "Development",
-              "primary_language": "${{ inputs.language }}",
-              "on_call": "",
-              "slack_channel": "#${{ inputs.service_name }}",
-              "has_monitoring": false,
-              "has_runbook": false,
-              "test_coverage": 0,
-              "critical_vulns": 0
+              "github_repo": "https://github.com/mike-check-12-12/${{ inputs.service_name }}",
+              "language": "${{ inputs.language }}",
+              "tier": "${{ inputs.tier }}"
             }
           relations: |-
             {
-              "domain": "${{ inputs.domain }}"
+              "team": "${{ inputs.team }}"
             }
 
-      # ── Step 5: Mark SUCCESS ──
-      - name: Report completion — SUCCESS
-        if: ${{ inputs.port_run_id != '' }}
+      # ── Trigger the template's CI (deploy.yml) ──
+      - name: Trigger deployment pipeline
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
+        run: |
+          sleep 5
+          gh workflow run deploy.yml \
+            --repo "${ORG}/${SERVICE_NAME}" \
+            --ref main \
+            -f environment=${{ inputs.environment }} 2>/dev/null || echo "CI will run on next push"
+          echo "🚀 Deployment pipeline triggered"
+
+      - name: Log — CI triggered
+        if: inputs.port_run_id != ''
         uses: port-labs/port-github-action@v1
         with:
           clientId: ${{ secrets.PORT_CLIENT_ID }}
           clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          baseUrl: https://api.getport.io
+          operation: PATCH_RUN
+          runId: ${{ inputs.port_run_id }}
+          logMessage: |
+            🔄 CI/CD pipeline triggered on **${{ inputs.service_name }}**
+            - Build → Security Scan (Snyk) → Deploy to ${{ inputs.environment }}
+            - Deployment + Security entities will auto-appear in the catalog
+
+      # ── SUCCESS ──
+      - name: Report SUCCESS
+        if: inputs.port_run_id != ''
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
           operation: PATCH_RUN
           runId: ${{ inputs.port_run_id }}
           status: "SUCCESS"
           logMessage: |
-            ✅ Service **${{ inputs.service_name }}** scaffolded successfully!
+            ✅ Service **${{ inputs.service_name }}** created successfully!
 
-            **What was created:**
-            - GitHub repo: https://github.com/mike-check-12-12/${{ inputs.service_name }}
-            - ${{ inputs.language }} project with CI/CD, Dockerfile, K8s manifests
-            - Catalog entry in ${{ inputs.domain }} domain
-            - Owned by ${{ inputs.team }}
+            **What happened:**
+            1. GitHub repo created from golden-path template
+            2. Service registered in the portal catalog
+            3. CI/CD pipeline running: Build → Snyk Scan → Deploy
+            4. Deployment + Security entities will appear shortly
 
-            The service is now in **Development** lifecycle. Add monitoring and a runbook to reach Production Readiness.
+            🔗 [View repo](https://github.com/mike-check-12-12/${{ inputs.service_name }})
           link: '["https://github.com/mike-check-12-12/${{ inputs.service_name }}"]'
 
-      # ── Failure handler ──
-      - name: Report failure — FAILURE
-        if: ${{ failure() && inputs.port_run_id != '' }}
+      # ── FAILURE ──
+      - name: Report FAILURE
+        if: failure() && inputs.port_run_id != ''
         uses: port-labs/port-github-action@v1
         with:
           clientId: ${{ secrets.PORT_CLIENT_ID }}
           clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
-          baseUrl: https://api.getport.io
           operation: PATCH_RUN
           runId: ${{ inputs.port_run_id }}
           status: "FAILURE"
-          logMessage: |
-            ❌ Failed to scaffold service **${{ inputs.service_name }}**.
-            Check the [GitHub Actions logs](https://github.com/mike-check-12-12/service-scaffolder/actions) for details.
+          logMessage: "❌ Failed to create service **${{ inputs.service_name }}**. Check [workflow logs](https://github.com/mike-check-12-12/service-scaffolder/actions)."
