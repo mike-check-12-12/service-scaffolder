@@ -46,7 +46,8 @@ jobs:
   scaffold:
     runs-on: ubuntu-latest
     steps:
-      - name: Log starting to Port
+      # ── Step 1: Inform Port the action is IN_PROGRESS ──
+      - name: Inform Port — action started
         if: ${{ inputs.port_run_id != '' }}
         uses: port-labs/port-github-action@v1
         with:
@@ -55,8 +56,15 @@ jobs:
           baseUrl: https://api.getport.io
           operation: PATCH_RUN
           runId: ${{ inputs.port_run_id }}
-          logMessage: "🚀 Starting scaffold for service '${{ inputs.service_name }}' in ${{ inputs.language }}..."
+          status: "IN_PROGRESS"
+          logMessage: |
+            🚀 Starting scaffold for service **${{ inputs.service_name }}**
+            - Language: ${{ inputs.language }}
+            - Domain: ${{ inputs.domain }}
+            - Team: ${{ inputs.team }}
+            - Tier: ${{ inputs.tier }}
 
+      # ── Step 2: Create the GitHub repository ──
       - name: Create service repository
         id: create_repo
         env:
@@ -75,6 +83,19 @@ jobs:
           echo "repo_name=${REPO_NAME}" >> $GITHUB_OUTPUT
           sleep 3
 
+      - name: Report progress — repo created
+        if: ${{ inputs.port_run_id != '' }}
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          baseUrl: https://api.getport.io
+          operation: PATCH_RUN
+          runId: ${{ inputs.port_run_id }}
+          logMessage: "📦 Repository **mike-check-12-12/${{ inputs.service_name }}** created successfully"
+          link: '["https://github.com/mike-check-12-12/${{ inputs.service_name }}"]'
+
+      # ── Step 3: Clone and scaffold the project ──
       - name: Clone and scaffold project structure
         env:
           GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
@@ -243,6 +264,36 @@ jobs:
           git commit -m "feat: scaffold ${REPO_NAME} microservice [platform-engineering]"
           git push origin main
 
+      - name: Report progress — code scaffolded
+        if: ${{ inputs.port_run_id != '' }}
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          baseUrl: https://api.getport.io
+          operation: PATCH_RUN
+          runId: ${{ inputs.port_run_id }}
+          logMessage: |
+            🏗️ Project scaffolded with:
+            - `src/` — ${{ inputs.language }} boilerplate
+            - `Dockerfile` — container build
+            - `k8s/deployment.yaml` — Kubernetes manifest
+            - `.github/workflows/ci.yaml` — CI pipeline
+            - `.github/CODEOWNERS` — team ownership
+            - `docs/SERVICE.md` — service catalog docs
+
+      # ── Step 4: Register in Port catalog ──
+      - name: Report progress — registering in catalog
+        if: ${{ inputs.port_run_id != '' }}
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          baseUrl: https://api.getport.io
+          operation: PATCH_RUN
+          runId: ${{ inputs.port_run_id }}
+          logMessage: "📋 Registering **${{ inputs.service_name }}** in the software catalog..."
+
       - name: Register service in Port catalog
         uses: port-labs/port-github-action@v1
         with:
@@ -270,7 +321,8 @@ jobs:
               "domain": "${{ inputs.domain }}"
             }
 
-      - name: Log completion to Port
+      # ── Step 5: Mark SUCCESS ──
+      - name: Report completion — SUCCESS
         if: ${{ inputs.port_run_id != '' }}
         uses: port-labs/port-github-action@v1
         with:
@@ -279,11 +331,21 @@ jobs:
           baseUrl: https://api.getport.io
           operation: PATCH_RUN
           runId: ${{ inputs.port_run_id }}
-          logMessage: "✅ Service '${{ inputs.service_name }}' scaffolded successfully! Repo: https://github.com/mike-check-12-12/${{ inputs.service_name }}"
           status: "SUCCESS"
+          logMessage: |
+            ✅ Service **${{ inputs.service_name }}** scaffolded successfully!
+
+            **What was created:**
+            - GitHub repo: https://github.com/mike-check-12-12/${{ inputs.service_name }}
+            - ${{ inputs.language }} project with CI/CD, Dockerfile, K8s manifests
+            - Catalog entry in ${{ inputs.domain }} domain
+            - Owned by ${{ inputs.team }}
+
+            The service is now in **Development** lifecycle. Add monitoring and a runbook to reach Production Readiness.
           link: '["https://github.com/mike-check-12-12/${{ inputs.service_name }}"]'
 
-      - name: Log failure to Port
+      # ── Failure handler ──
+      - name: Report failure — FAILURE
         if: ${{ failure() && inputs.port_run_id != '' }}
         uses: port-labs/port-github-action@v1
         with:
@@ -292,5 +354,7 @@ jobs:
           baseUrl: https://api.getport.io
           operation: PATCH_RUN
           runId: ${{ inputs.port_run_id }}
-          logMessage: "❌ Failed to scaffold service '${{ inputs.service_name }}'. Check workflow logs."
           status: "FAILURE"
+          logMessage: |
+            ❌ Failed to scaffold service **${{ inputs.service_name }}**.
+            Check the [GitHub Actions logs](https://github.com/mike-check-12-12/service-scaffolder/actions) for details.
