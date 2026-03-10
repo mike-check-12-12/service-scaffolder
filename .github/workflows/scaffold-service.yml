@@ -57,6 +57,14 @@ jobs:
           echo "id=$TEAM_ID" >> "$GITHUB_OUTPUT"
           echo "Resolved team identifier: $TEAM_ID"
 
+      - name: Generate Title Case name
+        id: title
+        run: |
+          # Convert kebab-case to Title Case: order-api -> Order API
+          TITLE=$(echo "$SERVICE_NAME" | sed 's/-/ /g' | sed 's/api/API/gi' | sed 's/\b\(.\)/\u\1/g')
+          echo "name=$TITLE" >> "$GITHUB_OUTPUT"
+          echo "Title Case: $TITLE"
+
       - name: Log action started
         if: inputs.port_run_id != ''
         uses: port-labs/port-github-action@v1
@@ -153,7 +161,7 @@ jobs:
           runId: ${{ inputs.port_run_id }}
           identifier: ${{ inputs.service_name }}
           blueprint: service
-          title: ${{ inputs.service_name }}
+          title: ${{ steps.title.outputs.name }}
           properties: |-
             {
               "github_repo": "https://github.com/mike-check-12-12/${{ inputs.service_name }}",
@@ -162,7 +170,8 @@ jobs:
             }
           relations: |-
             {
-              "team": "${{ steps.team.outputs.id }}"
+              "team": "${{ steps.team.outputs.id }}",
+              "githubRepository": "${{ inputs.service_name }}"
             }
 
       - name: Trigger deployment pipeline
