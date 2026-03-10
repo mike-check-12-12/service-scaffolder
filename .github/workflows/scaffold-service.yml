@@ -45,7 +45,6 @@ jobs:
       ORG: mike-check-12-12
 
     steps:
-      # ── Parse the team input ──
       - name: Parse team identifier
         id: team
         run: |
@@ -58,8 +57,7 @@ jobs:
           echo "id=$TEAM_ID" >> "$GITHUB_OUTPUT"
           echo "Resolved team identifier: $TEAM_ID"
 
-      # ── Log start ──
-      - name: Log – action started
+      - name: Log action started
         if: inputs.port_run_id != ''
         uses: port-labs/port-github-action@v1
         with:
@@ -68,13 +66,12 @@ jobs:
           operation: PATCH_RUN
           runId: ${{ inputs.port_run_id }}
           logMessage: |
-            🚀 Creating service **${{ inputs.service_name }}**
+            Creating service **${{ inputs.service_name }}**
             - Team: ${{ steps.team.outputs.id }}
             - Language: ${{ inputs.language }}
             - Environment: ${{ inputs.environment }}
             - Internet-facing: ${{ inputs.internet_facing }}
 
-      # ── Clone the golden-path template ──
       - name: Clone service-template
         env:
           GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
@@ -83,7 +80,6 @@ jobs:
           cd "${SERVICE_NAME}"
           rm -rf .git
 
-      # ── Customize the template ──
       - name: Customize template for this service
         env:
           TEAM_ID: ${{ steps.team.outputs.id }}
@@ -93,9 +89,8 @@ jobs:
           sed -i "s|SERVICE_NAME|${SERVICE_NAME}|g" catalog-info.yaml
           sed -i "s|TEAM_NAME|${TEAM_ID}|g" catalog-info.yaml
           sed -i "s|sample-service|${SERVICE_NAME}|g" app/main.py
-          echo "✅ Template customized for ${SERVICE_NAME}"
+          echo "Template customized for ${SERVICE_NAME}"
 
-      # ── Create or update the GitHub repo ──
       - name: Create GitHub repository
         env:
           GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
@@ -104,27 +99,25 @@ jobs:
           cd "${SERVICE_NAME}"
           git init
           git config user.email "platform@walmart.com"
-          git config user.name "Walmart Platform Bot"
+          git config user.name "Platform Bot"
           git checkout -b main
           git add -A
           git commit -m "feat: initialize ${SERVICE_NAME} from golden-path template"
 
-          # Create repo (or skip if it already exists)
           if gh repo view "${ORG}/${SERVICE_NAME}" --json name >/dev/null 2>&1; then
-            echo "📦 Repository ${ORG}/${SERVICE_NAME} already exists — pushing update"
+            echo "Repository ${ORG}/${SERVICE_NAME} already exists, pushing update"
             git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${ORG}/${SERVICE_NAME}.git"
             git push -u origin main --force
           else
             gh repo create "${ORG}/${SERVICE_NAME}" \
               --public \
-              --description "${SERVICE_NAME} — owned by ${TEAM_ID} (${{ inputs.language }})" \
+              --description "${SERVICE_NAME} owned by ${TEAM_ID} (${{ inputs.language }})" \
               --source . \
               --push
           fi
 
-          echo "📦 Repository ready: https://github.com/${ORG}/${SERVICE_NAME}"
+          echo "Repository ready: https://github.com/${ORG}/${SERVICE_NAME}"
 
-      # ── Set secrets on the new repo so its CI can talk to Port ──
       - name: Configure repo secrets
         env:
           GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
@@ -135,9 +128,9 @@ jobs:
           gh secret set PORT_CLIENT_SECRET \
             --body "${{ secrets.PORT_CLIENT_SECRET }}" \
             --repo "${ORG}/${SERVICE_NAME}"
-          echo "🔑 Port secrets configured on ${SERVICE_NAME}"
+          echo "Port secrets configured on ${SERVICE_NAME}"
 
-      - name: Log – repo created
+      - name: Log repo created
         if: inputs.port_run_id != ''
         uses: port-labs/port-github-action@v1
         with:
@@ -146,12 +139,11 @@ jobs:
           operation: PATCH_RUN
           runId: ${{ inputs.port_run_id }}
           logMessage: |
-            📦 Repository created from golden-path template
+            Repository created from golden-path template
             - Dockerfile, K8s manifests, CI pipeline included
             - Port secrets configured for automated catalog updates
           link: '["https://github.com/mike-check-12-12/${{ inputs.service_name }}"]'
 
-      # ── Register Service entity in Port ──
       - name: Register service in Port catalog
         uses: port-labs/port-github-action@v1
         with:
@@ -173,7 +165,6 @@ jobs:
               "team": "${{ steps.team.outputs.id }}"
             }
 
-      # ── Trigger the template's CI (deploy.yml) ──
       - name: Trigger deployment pipeline
         env:
           GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
@@ -183,9 +174,9 @@ jobs:
             --repo "${ORG}/${SERVICE_NAME}" \
             --ref main \
             -f environment=${{ inputs.environment }} 2>/dev/null || echo "CI will run on next push"
-          echo "🚀 Deployment pipeline triggered"
+          echo "Deployment pipeline triggered"
 
-      - name: Log – CI triggered
+      - name: Log CI triggered
         if: inputs.port_run_id != ''
         uses: port-labs/port-github-action@v1
         with:
@@ -194,11 +185,10 @@ jobs:
           operation: PATCH_RUN
           runId: ${{ inputs.port_run_id }}
           logMessage: |
-            🔄 CI/CD pipeline triggered on **${{ inputs.service_name }}**
-            - Build → Security Scan (Snyk) → Deploy to ${{ inputs.environment }}
-            - Deployment + Security entities will auto-appear in the catalog
+            CI/CD pipeline triggered on **${{ inputs.service_name }}**
+            - Build, Security Scan (Snyk), Deploy to ${{ inputs.environment }}
+            - Deployment and Security entities will auto-appear in the catalog
 
-      # ── SUCCESS ──
       - name: Report SUCCESS
         if: inputs.port_run_id != ''
         uses: port-labs/port-github-action@v1
@@ -209,18 +199,15 @@ jobs:
           runId: ${{ inputs.port_run_id }}
           status: "SUCCESS"
           logMessage: |
-            ✅ Service **${{ inputs.service_name }}** created successfully!
+            Service **${{ inputs.service_name }}** created successfully!
 
-            **What happened:**
+            What happened:
             1. GitHub repo created from golden-path template
             2. Service registered in the portal catalog
-            3. CI/CD pipeline running: Build → Snyk Scan → Deploy
-            4. Deployment + Security entities will appear shortly
-
-            🔗 [View repo](https://github.com/mike-check-12-12/${{ inputs.service_name }})
+            3. CI/CD pipeline running (Build, Snyk Scan, Deploy)
+            4. Deployment and Security entities will appear shortly
           link: '["https://github.com/mike-check-12-12/${{ inputs.service_name }}"]'
 
-      # ── FAILURE ──
       - name: Report FAILURE
         if: failure() && inputs.port_run_id != ''
         uses: port-labs/port-github-action@v1
@@ -230,4 +217,4 @@ jobs:
           operation: PATCH_RUN
           runId: ${{ inputs.port_run_id }}
           status: "FAILURE"
-          logMessage: "❌ Failed to create service **${{ inputs.service_name }}**. Check [workflow logs](https://github.com/mike-check-12-12/service-scaffolder/actions)."
+          logMessage: "Failed to create service **${{ inputs.service_name }}**. Check workflow logs: https://github.com/mike-check-12-12/service-scaffolder/actions"
