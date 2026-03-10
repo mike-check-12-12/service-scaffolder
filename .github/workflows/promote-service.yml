@@ -1,0 +1,89 @@
+name: Promote Service to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: "Service entity identifier"
+        required: true
+        type: string
+      port_run_id:
+        description: "Port action run ID (auto-populated)"
+        required: false
+        type: string
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      # ── Step 1: Log start ──
+      - name: Inform Port — promotion started
+        if: ${{ inputs.port_run_id != '' }}
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          baseUrl: https://api.getport.io
+          operation: PATCH_RUN
+          runId: ${{ inputs.port_run_id }}
+          logMessage: |
+            🚀 Promoting **${{ inputs.service_name }}** to Production
+            - Setting lifecycle to **Production**
+            - Enabling monitoring
+            - Enabling runbook
+
+      # ── Step 2: Update the service entity (lifecycle, monitoring, runbook) ──
+      - name: Update service — promote to Production
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          baseUrl: https://api.getport.io
+          operation: UPSERT
+          runId: ${{ inputs.port_run_id }}
+          identifier: ${{ inputs.service_name }}
+          blueprint: service
+          title: ${{ inputs.service_name }}
+          properties: |-
+            {
+              "lifecycle": "Production",
+              "has_monitoring": true,
+              "has_runbook": true
+            }
+          relations: |-
+            {}
+
+      # ── Step 3: Log completion ──
+      - name: Report completion — SUCCESS
+        if: ${{ inputs.port_run_id != '' }}
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          baseUrl: https://api.getport.io
+          operation: PATCH_RUN
+          runId: ${{ inputs.port_run_id }}
+          status: "SUCCESS"
+          logMessage: |
+            ✅ **${{ inputs.service_name }}** promoted to Production!
+
+            **Changes applied:**
+            - Lifecycle: Development → **Production**
+            - Monitoring: **enabled**
+            - Runbook: **enabled**
+            - Production Readiness scorecard should now reach **Silver**
+
+      # ── Failure handler ──
+      - name: Report failure — FAILURE
+        if: ${{ failure() && inputs.port_run_id != '' }}
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          baseUrl: https://api.getport.io
+          operation: PATCH_RUN
+          runId: ${{ inputs.port_run_id }}
+          status: "FAILURE"
+          logMessage: |
+            ❌ Failed to promote **${{ inputs.service_name }}** to Production.
+            Check the [GitHub Actions logs](https://github.com/mike-check-12-12/service-scaffolder/actions) for details.
