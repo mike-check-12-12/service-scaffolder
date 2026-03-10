@@ -1,0 +1,82 @@
+name: Add Business Domain
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain_id:
+        description: "Domain identifier (lowercase, hyphens)"
+        required: true
+        type: string
+      domain_title:
+        description: "Display name for the domain"
+        required: true
+        type: string
+      description:
+        description: "What this domain covers"
+        required: true
+        type: string
+      vp_owner:
+        description: "VP or executive owner"
+        required: true
+        type: string
+      slack_channel:
+        description: "Slack channel for the domain"
+        required: true
+        type: string
+      port_run_id:
+        description: "Port action run ID"
+        required: true
+        type: string
+
+jobs:
+  add-domain:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Log Starting
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          operation: PATCH_RUN
+          runId: ${{ inputs.port_run_id }}
+          logMessage: "🏢 Creating domain '${{ inputs.domain_title }}' owned by ${{ inputs.vp_owner }}..."
+
+      - name: Create Domain Entity in Port
+        id: create_domain
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          operation: UPSERT
+          identifier: ${{ inputs.domain_id }}
+          title: ${{ inputs.domain_title }}
+          blueprint: domain
+          runId: ${{ inputs.port_run_id }}
+          properties: |
+            {
+              "description": "${{ inputs.description }}",
+              "vp_owner": "${{ inputs.vp_owner }}",
+              "slack_channel": "${{ inputs.slack_channel }}"
+            }
+
+      - name: Report SUCCESS
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          operation: PATCH_RUN
+          runId: ${{ inputs.port_run_id }}
+          status: "SUCCESS"
+          logMessage: "✅ Domain '${{ inputs.domain_title }}' created successfully. VP Owner: ${{ inputs.vp_owner }}, Slack: ${{ inputs.slack_channel }}"
+
+      - name: Report FAILURE
+        if: failure()
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          operation: PATCH_RUN
+          runId: ${{ inputs.port_run_id }}
+          status: "FAILURE"
+          logMessage: "❌ Failed to create domain '${{ inputs.domain_title }}'"
