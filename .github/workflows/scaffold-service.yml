@@ -46,13 +46,10 @@ jobs:
 
     steps:
       # ── Parse the team input ──
-      # Port entity-format inputs arrive as full JSON objects.
-      # Extract just the identifier so downstream steps get a plain string.
       - name: Parse team identifier
         id: team
         run: |
           RAW_TEAM='${{ inputs.team }}'
-          # If the value looks like JSON, extract .identifier; otherwise use as-is
           if echo "$RAW_TEAM" | jq -e '.identifier' >/dev/null 2>&1; then
             TEAM_ID=$(echo "$RAW_TEAM" | jq -r '.identifier')
           else
@@ -92,20 +89,13 @@ jobs:
           TEAM_ID: ${{ steps.team.outputs.id }}
         run: |
           cd "${SERVICE_NAME}"
-
-          # Replace placeholders in k8s manifests
           sed -i "s|SERVICE_NAME|${SERVICE_NAME}|g" k8s/deployment.yaml
-
-          # Replace placeholders in catalog-info
           sed -i "s|SERVICE_NAME|${SERVICE_NAME}|g" catalog-info.yaml
           sed -i "s|TEAM_NAME|${TEAM_ID}|g" catalog-info.yaml
-
-          # Set service name in app
           sed -i "s|sample-service|${SERVICE_NAME}|g" app/main.py
-
           echo "✅ Template customized for ${SERVICE_NAME}"
 
-      # ── Create the GitHub repo ──
+      # ── Create or update the GitHub repo ──
       - name: Create GitHub repository
         env:
           GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
@@ -119,13 +109,20 @@ jobs:
           git add -A
           git commit -m "feat: initialize ${SERVICE_NAME} from golden-path template"
 
-          gh repo create "${ORG}/${SERVICE_NAME}" \
-            --public \
-            --description "${SERVICE_NAME} — owned by ${TEAM_ID} (${{ inputs.language }})" \
-            --source . \
-            --push
+          # Create repo (or skip if it already exists)
+          if gh repo view "${ORG}/${SERVICE_NAME}" --json name >/dev/null 2>&1; then
+            echo "📦 Repository ${ORG}/${SERVICE_NAME} already exists — pushing update"
+            git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${ORG}/${SERVICE_NAME}.git"
+            git push -u origin main --force
+          else
+            gh repo create "${ORG}/${SERVICE_NAME}" \
+              --public \
+              --description "${SERVICE_NAME} — owned by ${TEAM_ID} (${{ inputs.language }})" \
+              --source . \
+              --push
+          fi
 
-          echo "📦 Repository created: https://github.com/${ORG}/${SERVICE_NAME}"
+          echo "📦 Repository ready: https://github.com/${ORG}/${SERVICE_NAME}"
 
       # ── Set secrets on the new repo so its CI can talk to Port ──
       - name: Configure repo secrets
