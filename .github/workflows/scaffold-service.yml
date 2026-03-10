@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       team:
-        description: "Owning team identifier"
+        description: "Owning team identifier (may arrive as JSON entity from Port)"
         required: true
         type: string
       language:
@@ -45,8 +45,24 @@ jobs:
       ORG: mike-check-12-12
 
     steps:
+      # ── Parse the team input ──
+      # Port entity-format inputs arrive as full JSON objects.
+      # Extract just the identifier so downstream steps get a plain string.
+      - name: Parse team identifier
+        id: team
+        run: |
+          RAW_TEAM='${{ inputs.team }}'
+          # If the value looks like JSON, extract .identifier; otherwise use as-is
+          if echo "$RAW_TEAM" | jq -e '.identifier' >/dev/null 2>&1; then
+            TEAM_ID=$(echo "$RAW_TEAM" | jq -r '.identifier')
+          else
+            TEAM_ID="$RAW_TEAM"
+          fi
+          echo "id=$TEAM_ID" >> "$GITHUB_OUTPUT"
+          echo "Resolved team identifier: $TEAM_ID"
+
       # ── Log start ──
-      - name: Log — action started
+      - name: Log – action started
         if: inputs.port_run_id != ''
         uses: port-labs/port-github-action@v1
         with:
@@ -56,7 +72,7 @@ jobs:
           runId: ${{ inputs.port_run_id }}
           logMessage: |
             🚀 Creating service **${{ inputs.service_name }}**
-            - Team: ${{ inputs.team }}
+            - Team: ${{ steps.team.outputs.id }}
             - Language: ${{ inputs.language }}
             - Environment: ${{ inputs.environment }}
             - Internet-facing: ${{ inputs.internet_facing }}
@@ -72,18 +88,20 @@ jobs:
 
       # ── Customize the template ──
       - name: Customize template for this service
+        env:
+          TEAM_ID: ${{ steps.team.outputs.id }}
         run: |
           cd "${SERVICE_NAME}"
 
           # Replace placeholders in k8s manifests
-          sed -i "s/SERVICE_NAME/${SERVICE_NAME}/g" k8s/deployment.yaml
+          sed -i "s|SERVICE_NAME|${SERVICE_NAME}|g" k8s/deployment.yaml
 
           # Replace placeholders in catalog-info
-          sed -i "s/SERVICE_NAME/${SERVICE_NAME}/g" catalog-info.yaml
-          sed -i "s/TEAM_NAME/${{ inputs.team }}/g" catalog-info.yaml
+          sed -i "s|SERVICE_NAME|${SERVICE_NAME}|g" catalog-info.yaml
+          sed -i "s|TEAM_NAME|${TEAM_ID}|g" catalog-info.yaml
 
           # Set service name in app
-          sed -i "s/sample-service/${SERVICE_NAME}/g" app/main.py
+          sed -i "s|sample-service|${SERVICE_NAME}|g" app/main.py
 
           echo "✅ Template customized for ${SERVICE_NAME}"
 
@@ -91,6 +109,7 @@ jobs:
       - name: Create GitHub repository
         env:
           GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
+          TEAM_ID: ${{ steps.team.outputs.id }}
         run: |
           cd "${SERVICE_NAME}"
           git init
@@ -102,7 +121,7 @@ jobs:
 
           gh repo create "${ORG}/${SERVICE_NAME}" \
             --public \
-            --description "${SERVICE_NAME} — owned by ${{ inputs.team }} (${{ inputs.language }})" \
+            --description "${SERVICE_NAME} — owned by ${TEAM_ID} (${{ inputs.language }})" \
             --source . \
             --push
 
@@ -119,9 +138,9 @@ jobs:
           gh secret set PORT_CLIENT_SECRET \
             --body "${{ secrets.PORT_CLIENT_SECRET }}" \
             --repo "${ORG}/${SERVICE_NAME}"
-          echo "🔐 Port secrets configured on ${SERVICE_NAME}"
+          echo "🔑 Port secrets configured on ${SERVICE_NAME}"
 
-      - name: Log — repo created
+      - name: Log – repo created
         if: inputs.port_run_id != ''
         uses: port-labs/port-github-action@v1
         with:
@@ -154,7 +173,7 @@ jobs:
             }
           relations: |-
             {
-              "team": "${{ inputs.team }}"
+              "team": "${{ steps.team.outputs.id }}"
             }
 
       # ── Trigger the template's CI (deploy.yml) ──
@@ -169,7 +188,7 @@ jobs:
             -f environment=${{ inputs.environment }} 2>/dev/null || echo "CI will run on next push"
           echo "🚀 Deployment pipeline triggered"
 
-      - name: Log — CI triggered
+      - name: Log – CI triggered
         if: inputs.port_run_id != ''
         uses: port-labs/port-github-action@v1
         with:
