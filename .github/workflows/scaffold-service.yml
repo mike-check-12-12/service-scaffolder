@@ -32,7 +32,7 @@ on:
         type: choice
         options:
           - "Tier 1 - Critical"
-          - "Tier 2 - Important"
+          - "Tier 2 - Standard"
           - "Tier 3 - Internal"
       port_run_id:
         description: "Port action run ID (auto-populated)"
