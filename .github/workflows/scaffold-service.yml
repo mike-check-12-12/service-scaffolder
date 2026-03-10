@@ -300,6 +300,7 @@ jobs:
           clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
           baseUrl: https://api.getport.io
           operation: UPSERT
+          runId: ${{ inputs.port_run_id }}
           identifier: ${{ inputs.service_name }}
           blueprint: service
           title: ${{ inputs.service_name }}
