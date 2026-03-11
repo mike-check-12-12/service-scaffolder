@@ -170,8 +170,7 @@ jobs:
             }
           relations: |-
             {
-              "team": "${{ steps.team.outputs.id }}",
-              "githubRepository": "${{ inputs.service_name }}"
+              "team": "${{ steps.team.outputs.id }}"
             }
 
       - name: Trigger deployment pipeline
