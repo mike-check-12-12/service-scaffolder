@@ -41,7 +41,7 @@ jobs:
           logMessage: "Starting action: ${{ inputs.action_type }}"
 
       - name: Own a Service
-        if: ${{ inputs.action_type == 'own_service' }}
+        if: inputs.action_type == 'own_service'
         uses: port-labs/port-github-action@v1
         with:
           clientId: ${{ secrets.PORT_CLIENT_ID }}
@@ -55,15 +55,14 @@ jobs:
             }
 
       - name: Transition Jira Issue
-        if: ${{ inputs.action_type == 'transition_task' }}
+        if: inputs.action_type == 'transition_task'
         env:
           JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
           JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
-          JIRA_BASE_URL: "https://mike-check-12-12.atlassian.net"
+          JIRA_BASE_URL: https://mike-check-12-12.atlassian.net
           ISSUE_KEY: ${{ inputs.jira_issue_key }}
           TARGET_STATUS: ${{ inputs.target_status }}
         run: |
-          # Map status to Jira transition ID
           if [ "$TARGET_STATUS" = "in_progress" ]; then
             TRANSITION_ID="11"
             PORT_STATUS="In Progress"
@@ -75,18 +74,25 @@ jobs:
             exit 1
           fi
 
-          # Execute Jira transition
+          AUTH_TOKEN=$(echo -n "${JIRA_EMAIL}:${JIRA_TOKEN}" | base64 -w 0)
           echo "Transitioning $ISSUE_KEY to $PORT_STATUS (transition $TRANSITION_ID)"
-          curl -s -X POST \
-            -H "Authorization: Basic $(echo -n "$JIRA_EMAIL:$JIRA_TOKEN" | base64)" \
-            -H "Content-Type: application/json" \
-            -d "{\"transition\":{\"id\":\"$TRANSITION_ID\"}}" \
-            "$JIRA_BASE_URL/rest/api/3/issue/$ISSUE_KEY/transitions"
 
+          HTTP_CODE=$(curl -s -o /tmp/jira_resp.txt -w "%{http_code}" -X POST \
+            -H "Authorization: Basic ${AUTH_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"transition\":{\"id\":\"${TRANSITION_ID}\"}}" \
+            "${JIRA_BASE_URL}/rest/api/3/issue/${ISSUE_KEY}/transitions")
+
+          echo "HTTP response: $HTTP_CODE"
+          cat /tmp/jira_resp.txt || true
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "Jira API returned error: $HTTP_CODE"
+            exit 1
+          fi
           echo "Jira transition complete"
 
       - name: Update Port Jira Entity Status
-        if: ${{ inputs.action_type == 'transition_task' }}
+        if: inputs.action_type == 'transition_task'
         uses: port-labs/port-github-action@v1
         with:
           clientId: ${{ secrets.PORT_CLIENT_ID }}
@@ -96,8 +102,7 @@ jobs:
           blueprint: jiraIssue
           properties: |
             {
-              "status": "${{ inputs.target_status == 'in_progress' && 'In Progress' || 'Done' }}",
-              "updated": "${{ github.event.repository.updated_at }}"
+              "status": "${{ inputs.target_status == 'in_progress' && 'In Progress' || 'Done' }}"
             }
 
       - name: Report SUCCESS
@@ -119,4 +124,4 @@ jobs:
           operation: PATCH_RUN
           status: "FAILURE"
           runId: ${{ inputs.port_run_id }}
-          logMessage: "Action failed"
+          logMessage: "Action failed - check workflow logs"
