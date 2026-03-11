@@ -1,0 +1,122 @@
+name: Onboarding Actions
+on:
+  workflow_dispatch:
+    inputs:
+      action_type:
+        description: "Action type: own_service | transition_task"
+        required: true
+        type: string
+      port_run_id:
+        description: "Port action run ID"
+        required: true
+        type: string
+      service_id:
+        description: "Service identifier to own"
+        required: false
+        type: string
+      team_id:
+        description: "Team identifier"
+        required: false
+        type: string
+      jira_issue_key:
+        description: "Jira issue key to transition"
+        required: false
+        type: string
+      target_status:
+        description: "Target status: in_progress | done"
+        required: false
+        type: string
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inform start
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          operation: PATCH_RUN
+          runId: ${{ inputs.port_run_id }}
+          logMessage: "Starting action: ${{ inputs.action_type }}"
+
+      - name: Own a Service
+        if: ${{ inputs.action_type == 'own_service' }}
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          operation: UPSERT
+          identifier: ${{ inputs.service_id }}
+          blueprint: service
+          relations: |
+            {
+              "team": "${{ inputs.team_id }}"
+            }
+
+      - name: Transition Jira Issue
+        if: ${{ inputs.action_type == 'transition_task' }}
+        env:
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
+          JIRA_BASE_URL: "https://mike-check-12-12.atlassian.net"
+          ISSUE_KEY: ${{ inputs.jira_issue_key }}
+          TARGET_STATUS: ${{ inputs.target_status }}
+        run: |
+          # Map status to Jira transition ID
+          if [ "$TARGET_STATUS" = "in_progress" ]; then
+            TRANSITION_ID="11"
+            PORT_STATUS="In Progress"
+          elif [ "$TARGET_STATUS" = "done" ]; then
+            TRANSITION_ID="21"
+            PORT_STATUS="Done"
+          else
+            echo "Unknown status: $TARGET_STATUS"
+            exit 1
+          fi
+
+          # Execute Jira transition
+          echo "Transitioning $ISSUE_KEY to $PORT_STATUS (transition $TRANSITION_ID)"
+          curl -s -X POST \
+            -H "Authorization: Basic $(echo -n "$JIRA_EMAIL:$JIRA_TOKEN" | base64)" \
+            -H "Content-Type: application/json" \
+            -d "{\"transition\":{\"id\":\"$TRANSITION_ID\"}}" \
+            "$JIRA_BASE_URL/rest/api/3/issue/$ISSUE_KEY/transitions"
+
+          echo "Jira transition complete"
+
+      - name: Update Port Jira Entity Status
+        if: ${{ inputs.action_type == 'transition_task' }}
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          operation: UPSERT
+          identifier: ${{ inputs.jira_issue_key }}
+          blueprint: jiraIssue
+          properties: |
+            {
+              "status": "${{ inputs.target_status == 'in_progress' && 'In Progress' || 'Done' }}",
+              "updated": "${{ github.event.repository.updated_at }}"
+            }
+
+      - name: Report SUCCESS
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          operation: PATCH_RUN
+          status: "SUCCESS"
+          runId: ${{ inputs.port_run_id }}
+          logMessage: "Action completed successfully"
+
+      - name: Report FAILURE
+        if: failure()
+        uses: port-labs/port-github-action@v1
+        with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
+          operation: PATCH_RUN
+          status: "FAILURE"
+          runId: ${{ inputs.port_run_id }}
+          logMessage: "Action failed"
